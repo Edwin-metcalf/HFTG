@@ -57,6 +57,11 @@ export abstract class Node {
     }
 
     processPacket(packet: Packet): void {
+        for (const link of this.outgoingLinks) {
+            if (packet.dest === link.to) {
+                link.movePacket(packet);
+            }
+        }
     }
 
 }
@@ -65,12 +70,13 @@ export class FirmNode extends Node {
     draw(ctx: CanvasRenderingContext2D): void {
         ctx.fillRect(this.position.x - 20, this.position.y -20, 40, 40)
     }
-    
+
     processPacket(packet: Packet): void {
         for (const link of this.outgoingLinks) {
             if (packet.dest === link.to) {
                 console.log("going to destination");
                 link.movePacket(packet);
+                return;
             }
         }
         // if this fails then we need to do some ending saying there is no path to the dest
@@ -85,12 +91,25 @@ export class StockExchangeNode extends Node {
     //or each node could have a list of "stocks" and prices and check within that this 
     //approach would be harder to impliment but possibly more fun
     processPacket(packet: Packet): void {
+        /* this seems like a possible implementation but eventually may need 
+        to do like a graph finding algorithm like dijstras 
         if (packet.source == this){
             for (const link of this.outgoingLinks) {
                 link.movePacket(packet)
             }
         } else if (packet.dest === this) {
             this.calculateProfit(packet)
+        }
+            */
+        if (packet.dest === this) {
+            console.log("arrived")
+            this.calculateProfit(packet);
+        } else {
+            //if not final just forward it along 
+            for (const link of this.outgoingLinks) {
+                link.movePacket(packet);
+                return;
+            }
         }
     }
     setNewPrice(symbol: string, price: number) {
@@ -102,6 +121,7 @@ export class StockExchangeNode extends Node {
         if (packet.symbol === this.symbol) {
             let profit = this.price - packet.price;
             this.player.money += profit;
+            console.log(`total money ${this.player.money} + profit: ${profit}`);
         }
     }
 }

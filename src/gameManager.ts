@@ -52,9 +52,10 @@ export class GameManager {
             this.drawLinkPreview();
         }
         for (const link of this.linkList) {
-            link.draw(this.ctx);
+            link.update();
         }
         for(const node of this.nodeList) {
+            node.update();
             node.draw(this.ctx);
         }
 
@@ -140,7 +141,7 @@ export class GameManager {
             return null;
         }
 
-        let createdLink = new Link(endNode, this.lastStartingNode);
+        let createdLink = new Link(endNode, this.lastStartingNode, this.ctx);
         endNode.incomingLinks.push(createdLink);
         this.lastStartingNode.outgoingLinks.push(createdLink);
         this.linkList.push(createdLink);

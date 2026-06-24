@@ -11,29 +11,49 @@ export class Link {
     latency: number;
     bandwidth: number;
     cost: number;
+    ctx: CanvasRenderingContext2D;
 
-    constructor(to: Node, from: Node){
+    packetsInTransit: { packet: Packet, progress: number }[] =[];
+
+    constructor(to: Node, from: Node, ctx: CanvasRenderingContext2D){
         this.to = to;
         this.from = from;
-        this.latency = 5;
+        this.latency = 30;
         this.bandwidth = 5;
         this.cost = 100;
+        this.ctx = ctx;
     }
-    draw(ctx: CanvasRenderingContext2D) : void {
-        ctx.beginPath();
-        ctx.strokeStyle = '#ff0000';
-        ctx.lineWidth = 12;
+    draw() : void {
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = '#ff0000';
+        this.ctx.lineWidth = 12;
 
-        ctx.moveTo(this.from.position.x, this.from.position.y);
-        ctx.lineTo(this.to.position.x, this.to.position.y);
-        ctx.stroke();
-        
-        ctx.closePath();
+        this.ctx.moveTo(this.from.position.x, this.from.position.y);
+        this.ctx.lineTo(this.to.position.x, this.to.position.y);
+        this.ctx.stroke();
+
+        this.ctx.closePath();
     }
 
     movePacket(packet: Packet) {
         //draw something on the screen
-        this.to.recievePackets(packet);
+        this.packetsInTransit.push({ packet, progress: 0});
+    }
+
+    update() {
+        this.draw();
+        this.packetsInTransit = this.packetsInTransit.filter(transit => {
+            transit.progress += 1 / (this.latency * 60); //this makes it in seconds
+
+            if (transit.progress >= 1) {
+                this.to.recievePackets(transit.packet);
+                return false; //ie remove this from list
+            }
+            const x = this.from.position.x + (this.to.position.x - this.from.position.x) * transit.progress;
+            const y = this.from.position.y + (this.to.position.y - this.from.position.y) * transit.progress;
+            transit.packet.draw(this.ctx, {x,y});
+            return true;
+        });
     }
 
 }
