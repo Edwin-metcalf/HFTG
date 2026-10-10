@@ -202,7 +202,29 @@ export class FirmNode extends Node {
                 ctx.fill();
             }
         }
+
+        //a clean count of how many packets are waiting + being worked on
+        this.drawQueueCount(ctx, shown, barHeight, gap, hqTop);
         ctx.restore();
+    }
+
+    private drawQueueCount(ctx: CanvasRenderingContext2D, shown: number, barHeight: number, gap: number, hqTop: number): void {
+        const badgeY = hqTop - 14 - shown * (barHeight + gap) - 16;
+        const badgeHeight = 24;
+        ctx.font = `bold 15px ${MONO}`;
+        const text = String(this.processingQueue.length);
+        const badgeWidth = Math.max(34, ctx.measureText(text).width + 18);
+
+        ctx.beginPath();
+        ctx.roundRect(this.position.x - badgeWidth / 2, badgeY - badgeHeight / 2, badgeWidth, badgeHeight, badgeHeight / 2);
+        ctx.fillStyle = THEME.ink;
+        ctx.fill();
+
+        ctx.fillStyle = THEME.hqText;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, this.position.x, badgeY + 1);
+        ctx.textBaseline = 'alphabetic';
     }
 
     recievePackets(packet: Packet): void {

@@ -40,7 +40,7 @@ export class Link {
         this.length = Math.sqrt(dx * dx + dy * dy);
 
         //longer cables are slower to traverse; line upgrades divide this down
-        this.latency = Math.max(1.1, this.length / 360);
+        this.latency = Math.max(1.6, this.length / 240);
         this.bandwidth = 5;
         this.cost = cableCost(a.position, b.position);
         this.color = LINE_COLORS[lineColorCursor % LINE_COLORS.length];

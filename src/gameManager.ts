@@ -23,7 +23,7 @@ export interface UpgradeOption {
 const SYMBOLS = ["AAPL", "BTC", "GOLD", "OIL", "ETH", "NVDA", "TSLA", "SOL"];
 
 //how long an opportunity (its whole burst) stays tradeable, in seconds
-const OPPORTUNITY_TTL = 20;
+const OPPORTUNITY_TTL = 24;
 //minimum price gap before we consider spawning a trade
 const MIN_SPREAD = 0.6;
 //how close the cursor must be to grab or snap to a node
@@ -35,12 +35,12 @@ const BATCH_MIN = 4;
 const BATCH_MAX = 8;
 
 //progression runs in days (minimetro-style weeks)
-const DAY_TICKS = 60 * 30; //30 seconds per day
+const DAY_TICKS = 60 * 60; //60 seconds per day
 const MAX_PAIRS = 4;
 
 //trade flow ramps with the day; upgrades are how you keep up
-const BASE_SPAWN_INTERVAL = 300;
-const SPAWN_DAY_DECAY = 0.8;
+const BASE_SPAWN_INTERVAL = 600; //10s between opportunities on day 1
+const SPAWN_DAY_DECAY = 0.88;
 
 //cable upgrade: +75% speed per level
 const CABLE_SPEED_STEP = 0.75;
@@ -340,6 +340,7 @@ export class GameManager {
             packet.size = PACKET_SIZE;
             pick.source.recievePackets(packet);
         }
+        this.pushText(`\u00d7${batch} ${pick.symbol}`, pick.source.position, THEME.inkSoft);
     }
 
     getRandomXYpoint(): XYpoint {
