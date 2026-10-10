@@ -9,8 +9,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <canvas tabindex="0" id="canvas" width="1920" height="1080"></canvas>
   <div id="overlay" class="overlay hidden">
     <div class="panel">
-      <h2 id="overlayTitle">Day complete</h2>
-      <p class="subtitle">Choose one upgrade for tomorrow</p>
+      <h2>Choose one upgrade</h2>
       <div id="overlayChoices" class="choices"></div>
     </div>
   </div>
@@ -25,7 +24,6 @@ function init() {
   }
 
   const overlay = document.getElementById('overlay') as HTMLDivElement;
-  const overlayTitle = document.getElementById('overlayTitle') as HTMLHeadingElement;
   const overlayChoices = document.getElementById('overlayChoices') as HTMLDivElement;
 
   const player = new Firm();
@@ -44,7 +42,6 @@ function init() {
     if (overlayDay === gameManager.day) return;
     overlayDay = gameManager.day;
 
-    overlayTitle.textContent = `Day ${gameManager.day} complete`;
     overlayChoices.innerHTML = '';
     for (const option of gameManager.upgradeChoices()) {
       const button = document.createElement('button');

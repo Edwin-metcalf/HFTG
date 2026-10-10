@@ -35,7 +35,9 @@ const BATCH_MIN = 4;
 const BATCH_MAX = 8;
 
 //progression runs in days (minimetro-style weeks)
-const DAY_TICKS = 60 * 60; //60 seconds per day
+//each day is a bit longer than the last, so upgrades arrive further apart
+const BASE_DAY_TICKS = 60 * 60; //60 seconds on day 1
+const DAY_GROWTH_TICKS = 60 * 10; //+10 seconds each day
 const MAX_PAIRS = 4;
 
 //trade flow ramps with the day; upgrades are how you keep up
@@ -161,8 +163,8 @@ export class GameManager {
             if (node instanceof StockExchangeNode) node.tickPrice();
         }
 
-        if (this.dayTicks >= DAY_TICKS) {
-            this.dayTicks = DAY_TICKS;
+        if (this.dayTicks >= this.dayLength()) {
+            this.dayTicks = this.dayLength();
             this.gameState = GameState.ChoosingUpgrade;
         }
     }
@@ -184,8 +186,13 @@ export class GameManager {
         return Math.max(30, Math.round(BASE_SPAWN_INTERVAL * Math.pow(SPAWN_DAY_DECAY, this.day - 1)));
     }
 
+    //how long the current day lasts, in ticks
+    dayLength(): number {
+        return BASE_DAY_TICKS + (this.day - 1) * DAY_GROWTH_TICKS;
+    }
+
     dayProgress(): number {
-        return Math.min(1, this.dayTicks / DAY_TICKS);
+        return Math.min(1, this.dayTicks / this.dayLength());
     }
 
     //the two upgrades offered at the end of each day

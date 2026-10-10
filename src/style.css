@@ -79,16 +79,10 @@ canvas#canvas {
 }
 
 .panel h2 {
-  margin: 0;
+  margin: 0 0 16px;
   font-family: ui-monospace, SFMono-Regular, Menlo, 'Roboto Mono', monospace;
-  font-size: 26px;
+  font-size: 24px;
   color: #2f2a26;
-}
-
-.panel .subtitle {
-  margin: 0 0 14px;
-  font-size: 15px;
-  color: #6f665c;
 }
 
 .choices {
