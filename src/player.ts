@@ -13,8 +13,8 @@ export class Firm {
     ownedLinks: Link[]
 
     constructor() {
-        this.money = 1000;
-        this.reputation = 50;
+        this.money = 556;
+        this.reputation = 0;
         this.researchLevel = 0;
 
         this.ownedLinks = [];
