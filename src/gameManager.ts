@@ -5,6 +5,7 @@ import type { Firm } from "./player";
 import { FONT, LINE, MONO, STATION, THEME } from "./theme";
 
 export enum GameState {
+    Start = "START",
     PlacingFirm = "PLACINGFIRM",
     SpawningExchanges = "SPAWNINGEXCHANGES",
     Playing = "PLAYING",
@@ -95,7 +96,7 @@ export class GameManager {
         this.elapsedTime = 0;
         this.player = player;
         this.ctx = ctx;
-        this.gameState = GameState.PlacingFirm;
+        this.gameState = GameState.Start;
 
         this.events = {
             onProfit: (amount, pos) => {
@@ -115,7 +116,26 @@ export class GameManager {
 
 
     update(){
-        if (this.gameState === GameState.PlacingFirm) return;
+        if (this.gameState === GameState.Start) {
+            this.drawBackground();
+            return;
+        }
+
+        if (this.gameState === GameState.PlacingFirm) {
+            this.drawBackground();
+            this.updatePointerState();
+            this.drawLinkPreview();
+            for (const link of this.linkList) {
+                link.draw();
+            }
+            for(const node of this.nodeList) {
+                node.draw(this.ctx);
+            }
+            this.drawHighlights();
+            this.updateFloatingTexts();
+            this.drawHint();
+            return;
+        }
 
         if (this.gameState === GameState.Playing) {
             this.simulate();
@@ -514,6 +534,19 @@ export class GameManager {
     }
 
     private drawHint() {
+        if (this.gameState === GameState.PlacingFirm) {
+            this.ctx.save();
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = THEME.ink;
+            this.ctx.font = `28px ${FONT}`;
+            this.ctx.fillText(
+                'Click anywhere to place your HQ',
+                this.ctx.canvas.width / 2,
+                this.ctx.canvas.height / 2,
+            );
+            this.ctx.restore();
+            return;
+        }
         if (this.linkList.length > 0 || this.nodeList.length < 2) return;
         this.ctx.save();
         this.ctx.textAlign = 'center';
@@ -527,7 +560,7 @@ export class GameManager {
         this.ctx.restore();
     }
 
-    private pushText(text: string, pos: XYpoint, color: string) {
+    pushText(text: string, pos: XYpoint, color: string) {
         this.floatingTexts.push({
             text,
             pos: { x: pos.x, y: pos.y - 40 },

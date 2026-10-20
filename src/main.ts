@@ -7,6 +7,14 @@ import type { XYpoint } from './network/nodes'
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <div class="stage">
   <canvas tabindex="0" id="canvas" width="1920" height="1080"></canvas>
+  <div id="startOverlay" class="overlay start-overlay">
+    <div class="panel start-panel">
+      <h1 class="start-title">HFTG</h1>
+      <p class="start-desc">Build a high-frequency trading network. Place your firm, connect nodes, and route packets to capture trading opportunities.</p>
+      <button id="playBtn" class="play-btn" type="button">Play</button>
+      <p class="start-hint">Press Enter or Space to play</p>
+    </div>
+  </div>
   <div id="overlay" class="overlay hidden">
     <div class="panel">
       <h2>Choose one upgrade</h2>
@@ -23,12 +31,32 @@ function init() {
     return
   }
 
+  canvas.style.display = 'none';
+
+  const startOverlay = document.getElementById('startOverlay') as HTMLDivElement;
+  const playBtn = document.getElementById('playBtn') as HTMLButtonElement;
   const overlay = document.getElementById('overlay') as HTMLDivElement;
   const overlayChoices = document.getElementById('overlayChoices') as HTMLDivElement;
 
   const player = new Firm();
   const gameManager = new GameManager(player, ctx);
   new Renderer(ctx);
+
+  function startGame() {
+    startOverlay.classList.add('hidden');
+    canvas.style.display = 'block';
+    gameManager.gameState = "PLACINGFIRM" as any;
+    canvas.focus();
+    gameManager.pushText('Click anywhere to place your HQ', { x: canvas.width / 2, y: canvas.height / 2 }, '#2f2a26');
+  }
+
+  playBtn.addEventListener('click', startGame);
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if ((e.key === 'Enter' || e.key === ' ') && startOverlay.classList.contains('hidden') === false) {
+      e.preventDefault();
+      startGame();
+    }
+  });
 
   //remember which day the open overlay belongs to so we only build it once
   let overlayDay = -1;
