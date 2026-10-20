@@ -88,6 +88,10 @@ export class GameManager {
     hoveredNode: Node | null = null;
     linkTarget: Node | null = null;
     linkTargetValid: boolean = false;
+    splitTarget: { link: Link, node: Node, t: number, dist: number, extraCost: number, point: XYpoint } | null = null;
+    editingLink: Link | null = null;
+    editHandlePos: XYpoint | null = null;
+    editSplitTarget: { node: Node, extraCost: number } | null = null;
 
     private events: NodeEvents;
 
@@ -126,6 +130,7 @@ export class GameManager {
             this.updatePointerState();
             this.drawLinkPreview();
             for (const link of this.linkList) {
+                if (link.dead && link.packetsInTransit.length === 0) continue;
                 link.draw();
             }
             for(const node of this.nodeList) {
@@ -148,7 +153,8 @@ export class GameManager {
         this.drawLinkPreview();
 
         for (const link of this.linkList) {
-            if (this.gameState === GameState.Playing) link.update();
+            if (link.dead && link.packetsInTransit.length === 0) continue;
+            if (!link.dead) link.update();
             else link.draw();
         }
         for(const node of this.nodeList) {
@@ -294,6 +300,17 @@ export class GameManager {
 
     //tracks what the pointer is hovering / snapping to
     private updatePointerState() {
+        if (this.editingLink) {
+            this.hoveredNode = null;
+            this.linkTarget = null;
+            this.linkTargetValid = false;
+            if (this.mousePos) {
+                this.ctx.canvas.style.cursor = 'pointer';
+            } else {
+                this.ctx.canvas.style.cursor = 'default';
+            }
+            return;
+        }
         const start = this.lastStartingNode;
         this.hoveredNode = null;
         this.linkTarget = null;
@@ -304,23 +321,89 @@ export class GameManager {
             return;
         }
 
+        this.splitTarget = null;
         if (start) {
             const target = this.getNodeAtPosition(this.mousePos, NODE_HIT_RADIUS);
             this.linkTarget = target;
             if (target) {
-                this.linkTargetValid = target !== start
-                    && !start.links.some(cable => cable.connects(start, target))
-                    && cableCost(start.position, target.position) <= this.player.money;
+                const alreadyLinked = start.links.some(cable => cable.connects(start, target));
+                const costDirect = cableCost(start.position, target.position);
+                const valid = target !== start && !alreadyLinked && costDirect <= this.player.money;
+                if (valid) {
+                    this.linkTargetValid = true;
+                } else {
+                    this.linkTargetValid = false;
+                }
+            }
+            const splitCandidate = this.findSplitCandidate(start, this.mousePos);
+            if (splitCandidate && !this.linkTargetValid) {
+                this.splitTarget = splitCandidate;
+                this.linkTargetValid = splitCandidate.extraCost <= this.player.money;
             }
             this.ctx.canvas.style.cursor = 'pointer';
             return;
         }
 
+        const split = this.findSplitCandidate(null, this.mousePos);
+        if (split) {
+            this.splitTarget = split;
+            this.ctx.canvas.style.cursor = 'pointer';
+            return;
+        }
+        const hitLink = this.findLinkAt(this.mousePos);
+        if (hitLink) {
+            this.ctx.canvas.style.cursor = 'grab';
+            return;
+        }
         this.hoveredNode = this.getNodeAtPosition(this.mousePos, NODE_HIT_RADIUS);
         this.ctx.canvas.style.cursor = this.hoveredNode ? 'pointer' : 'default';
     }
 
     //heper for nodes positions
+    private closestPointOnSegment(a: XYpoint, b: XYpoint, p: XYpoint): { point: XYpoint, t: number } {
+        const abx = b.x - a.x;
+        const aby = b.y - a.y;
+        const apx = p.x - a.x;
+        const apy = p.y - a.y;
+        const abLen2 = abx * abx + aby * aby;
+        if (abLen2 === 0) {
+            return { point: { x: a.x, y: a.y }, t: 0 };
+        }
+        let t = (apx * abx + apy * aby) / abLen2;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        return {
+            point: { x: a.x + abx * t, y: a.y + aby * t },
+            t
+        };
+    }
+
+    private findSplitCandidate(startNode: Node | null, _pos: XYpoint) {
+        const candidates: Array<{ link: Link, node: Node, t: number, dist: number, extraCost: number, point: XYpoint }> = [];
+        const snap = NODE_HIT_RADIUS;
+        for (const link of this.linkList) {
+            if (startNode && (link.a === startNode || link.b === startNode)) continue;
+            for (const node of this.nodeList) {
+                if (!(node instanceof StockExchangeNode)) continue;
+                if (node.links.length > 0) continue;
+                if (startNode && node === startNode) continue;
+                const cp = this.closestPointOnSegment(link.a.position, link.b.position, node.position);
+                const dist = Math.hypot(node.position.x - cp.point.x, node.position.y - cp.point.y);
+                if (dist > snap) continue;
+                if (cp.t <= 0.001 || cp.t >= 0.999) continue;
+                const cOld = cableCost(link.a.position, link.b.position);
+                const c1 = cableCost(link.a.position, node.position);
+                const c2 = cableCost(node.position, link.b.position);
+                let extra = (c1 + c2) - cOld;
+                if (extra < 0) extra = 0;
+                candidates.push({ link, node, t: cp.t, dist, extraCost: extra, point: cp.point });
+            }
+        }
+        if (candidates.length === 0) return null;
+        candidates.sort((a, b) => a.dist - b.dist || a.extraCost - b.extraCost);
+        return candidates[0];
+    }
+
     getNodeAtPosition(pos: XYpoint, radius: number): Node | null {
         for (const node of this.nodeList) {
             const dist = Math.sqrt((pos.x - node.position.x)**2 + (pos.y - node.position.y)**2)
@@ -442,14 +525,47 @@ export class GameManager {
     }
 
     startLink(pos: XYpoint) {
+        this.cancelEdit();
+        this.splitTarget = null;
         let startNode = this.getNodeAtPosition(pos, NODE_HIT_RADIUS);
-        if (!startNode) return null;
-
-        this.lastStartingNode = startNode;
+        if (startNode) {
+            this.lastStartingNode = startNode;
+            return;
+        }
+        const hitLink = this.findLinkAt(pos);
+        if (hitLink) {
+            this.editingLink = hitLink;
+            this.editHandlePos = { x: pos.x, y: pos.y };
+            this.editSplitTarget = null;
+            hitLink.fading = true;
+            return;
+        }
+        const split = this.findSplitCandidate(null, pos);
+        if (split && split.extraCost <= this.player.money) {
+            this.splitTarget = split;
+            this.lastStartingNode = { position: split.point } as Node;
+            return;
+        }
+        this.lastStartingNode = null;
     }
 
     placingLink(pos: XYpoint) {
         this.mousePos = pos;
+        if (this.editingLink) {
+            this.editHandlePos = { x: pos.x, y: pos.y };
+            const target = this.findEditSplitTarget(this.editingLink, pos);
+            this.editSplitTarget = target;
+            return;
+        }
+    }
+
+    cancelEdit() {
+        if (this.editingLink) {
+            this.editingLink.fading = false;
+        }
+        this.editingLink = null;
+        this.editHandlePos = null;
+        this.editSplitTarget = null;
     }
 
     clearPointer() {
@@ -457,11 +573,61 @@ export class GameManager {
         this.hoveredNode = null;
         this.linkTarget = null;
         this.linkTargetValid = false;
+        this.splitTarget = null;
+        this.cancelEdit();
         this.ctx.canvas.style.cursor = 'default';
     }
 
+    private splitLink(split: { link: Link, node: Node, extraCost: number }) {
+        if (split.extraCost > this.player.money) {
+            this.pushText('INSUFFICIENT FUNDS', split.node.position, THEME.warning);
+            return;
+        }
+        const link = split.link;
+        const m = split.node;
+        const a = link.a;
+        const b = link.b;
+        const ctx = this.ctx;
+
+        this.player.money -= split.extraCost;
+
+        link.fading = true;
+        link.dead = true;
+        this.linkList = this.linkList.filter(l => l !== link);
+        a.links = a.links.filter(l => l !== link);
+        b.links = b.links.filter(l => l !== link);
+
+        const l1 = new Link(a, m, ctx);
+        const l2 = new Link(m, b, ctx);
+        const speed = this.cableSpeed();
+        l1.speed = speed;
+        l2.speed = speed;
+        this.linkList.push(l1, l2);
+        a.links.push(l1);
+        m.links.push(l1);
+        m.links.push(l2);
+        b.links.push(l2);
+    }
+
     placeLink(pos: XYpoint) {
+        if (this.editingLink) {
+            if (this.editSplitTarget && this.editSplitTarget.extraCost <= this.player.money) {
+                this.splitLink({ link: this.editingLink, node: this.editSplitTarget.node, extraCost: this.editSplitTarget.extraCost });
+            } else if (this.editSplitTarget) {
+                this.pushText('INSUFFICIENT FUNDS', this.editSplitTarget.node.position, THEME.warning);
+            }
+            this.cancelEdit();
+            return null;
+        }
         const startNode = this.lastStartingNode;
+        const split = this.splitTarget;
+        if (split) {
+            this.splitLink(split);
+            this.splitTarget = null;
+            this.lastStartingNode = null;
+            this.clearPointer();
+            return null;
+        }
         let endNode = this.getNodeAtPosition(pos, NODE_HIT_RADIUS);
         if (!endNode || !startNode || endNode === startNode) {
             //reset starting node on failure
@@ -494,7 +660,69 @@ export class GameManager {
     }
 
     drawLinkPreview() {
+        if (this.editingLink && this.editHandlePos && this.mousePos) {
+            const link = this.editingLink;
+            const a = link.a.position;
+            const b = link.b.position;
+            const m = this.editSplitTarget ? this.editSplitTarget.node.position : this.editHandlePos;
+            this.ctx.save();
+            this.ctx.globalAlpha = 0.7;
+            this.ctx.beginPath();
+            this.ctx.moveTo(a.x, a.y);
+            this.ctx.lineTo(m.x, m.y);
+            this.ctx.lineTo(b.x, b.y);
+            this.ctx.strokeStyle = this.editSplitTarget ? (this.editSplitTarget.extraCost <= this.player.money ? THEME.positive : THEME.negative) : THEME.ink;
+            this.ctx.lineWidth = LINE.width;
+            this.ctx.lineCap = 'round';
+            this.ctx.setLineDash([18, 16]);
+            this.ctx.stroke();
+            this.ctx.restore();
+            if (this.editSplitTarget) {
+                const cost = this.editSplitTarget.extraCost;
+                const affordable = cost <= this.player.money;
+                const midX = (a.x + b.x) / 2;
+                const midY = (a.y + b.y) / 2 - 14;
+                this.ctx.save();
+                this.ctx.textAlign = 'center';
+                this.ctx.font = `bold 20px ${MONO}`;
+                this.ctx.fillStyle = affordable ? THEME.ink : THEME.negative;
+                this.ctx.fillText(`$${cost}`, midX, midY);
+                this.ctx.restore();
+            }
+            return;
+        }
         if (!this.lastStartingNode || !this.mousePos) return;
+
+        if (this.splitTarget) {
+            const split = this.splitTarget;
+            const start = split.link.a.position;
+            const mid = split.node.position;
+            const end = split.link.b.position;
+            const color = this.linkTargetValid ? THEME.positive : THEME.negative;
+            this.ctx.save();
+            this.ctx.globalAlpha = 0.7;
+            this.ctx.beginPath();
+            this.ctx.moveTo(start.x, start.y);
+            this.ctx.lineTo(mid.x, mid.y);
+            this.ctx.lineTo(end.x, end.y);
+            this.ctx.strokeStyle = color;
+            this.ctx.lineWidth = LINE.width;
+            this.ctx.lineCap = 'round';
+            this.ctx.setLineDash([18, 16]);
+            this.ctx.stroke();
+            this.ctx.restore();
+            const cost = split.extraCost;
+            const affordable = cost <= this.player.money;
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2 - 14;
+            this.ctx.save();
+            this.ctx.textAlign = 'center';
+            this.ctx.font = `bold 20px ${MONO}`;
+            this.ctx.fillStyle = affordable ? THEME.ink : THEME.negative;
+            this.ctx.fillText(`$${cost}`, midX, midY);
+            this.ctx.restore();
+            return;
+        }
 
         //snap to the target node when there is one
         const end = this.linkTarget ? this.linkTarget.position : this.mousePos;
@@ -527,8 +755,91 @@ export class GameManager {
         this.ctx.restore();
     }
 
+    private distanceToSegment(p: XYpoint, a: XYpoint, b: XYpoint): { dist: number, point: XYpoint } {
+        const abx = b.x - a.x;
+        const aby = b.y - a.y;
+        const apx = p.x - a.x;
+        const apy = p.y - a.y;
+        const abLen2 = abx * abx + aby * aby;
+        if (abLen2 === 0) {
+            const d = Math.hypot(p.x - a.x, p.y - a.y);
+            return { dist: d, point: { x: a.x, y: a.y } };
+        }
+        let t = (apx * abx + apy * aby) / abLen2;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        const point = { x: a.x + abx * t, y: a.y + aby * t };
+        const dist = Math.hypot(p.x - point.x, p.y - point.y);
+        return { dist, point };
+    }
+
+    private findLinkAt(pos: XYpoint): Link | null {
+        let best: Link | null = null;
+        let bestDist = 22;
+        for (const link of this.linkList) {
+            if (link.dead) continue;
+            const res = this.distanceToSegment(pos, link.a.position, link.b.position);
+            if (res.dist < bestDist) {
+                bestDist = res.dist;
+                best = link;
+            }
+        }
+        return best;
+    }
+
+    private findEditSplitTarget(link: Link, pos: XYpoint): { node: Node, extraCost: number } | null {
+        const candidates: Array<{ node: Node, extraCost: number, dist: number }> = [];
+        const snap = NODE_HIT_RADIUS;
+        for (const node of this.nodeList) {
+            if (!(node instanceof StockExchangeNode)) continue;
+            if (node.links.length > 0) continue;
+            const dist = Math.hypot(node.position.x - pos.x, node.position.y - pos.y);
+            if (dist > snap) continue;
+            const cOld = cableCost(link.a.position, link.b.position);
+            const c1 = cableCost(link.a.position, node.position);
+            const c2 = cableCost(node.position, link.b.position);
+            let extra = (c1 + c2) - cOld;
+            if (extra < 0) extra = 0;
+            candidates.push({ node, extraCost: extra, dist });
+        }
+        if (candidates.length === 0) return null;
+        candidates.sort((a, b) => a.dist - b.dist || a.extraCost - b.extraCost);
+        return { node: candidates[0].node, extraCost: candidates[0].extraCost };
+    }
+
+    private drawLinkHover() {
+        if (this.editingLink || !this.mousePos) return;
+        if (this.lastStartingNode) return;
+        const hit = this.findLinkAt(this.mousePos);
+        if (!hit || hit.dead) return;
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.4;
+        this.ctx.beginPath();
+        this.ctx.strokeStyle = THEME.ink;
+        this.ctx.lineWidth = LINE.width + 6;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        const control = (hit as any).controlPoint ? (hit as any).controlPoint() : { x: (hit.a.position.x + hit.b.position.x)/2, y: (hit.a.position.y + hit.b.position.y)/2 };
+        this.ctx.moveTo(hit.a.position.x, hit.a.position.y);
+        this.ctx.quadraticCurveTo(control.x, control.y, hit.b.position.x, hit.b.position.y);
+        this.ctx.stroke();
+        this.ctx.restore();
+    }
+
     private drawHighlights() {
         const radius = STATION.radius + 9;
+        this.drawLinkHover();
+
+        if (this.editSplitTarget && this.editHandlePos) {
+            const pulse = radius + Math.sin(this.tick / 8) * 2;
+            this.drawRing(this.editSplitTarget.node.position, pulse, THEME.positive, 3, 0.95);
+        }
+
+        if (this.splitTarget && this.splitTarget.node) {
+            const pulse = radius + Math.sin(this.tick / 8) * 2;
+            const color = this.linkTargetValid ? THEME.positive : THEME.negative;
+            this.drawRing(this.splitTarget.node.position, pulse, color, 3, 0.95);
+        }
 
         if (this.lastStartingNode) {
             const pulse = radius + Math.sin(this.tick / 8) * 2;

@@ -68,6 +68,12 @@ function init() {
     if ((e.key === 'Enter' || e.key === ' ') && startOverlay.classList.contains('hidden') === false) {
       e.preventDefault();
       startGame();
+      return;
+    }
+    if (e.key === 'Escape') {
+      if ((gameManager as any).editingLink) {
+        (gameManager as any).cancelEdit();
+      }
     }
   });
 
@@ -117,6 +123,7 @@ function init() {
   }
 
   canvas.addEventListener('mousedown', (e: MouseEvent) => {
+    if (e.button !== 0) return;
     //these make sure its the correct location on the screen relative to canvas on page
     const point = getCanvasPos(e);
 
@@ -125,6 +132,13 @@ function init() {
     } else {
       //this will need states cause mousedown cant always do the same thing
       gameManager.startLink(point)
+    }
+  });
+
+  canvas.addEventListener('contextmenu', (e: MouseEvent) => {
+    e.preventDefault();
+    if ((gameManager as any).editingLink) {
+      (gameManager as any).cancelEdit();
     }
   });
 

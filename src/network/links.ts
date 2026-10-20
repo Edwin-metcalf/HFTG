@@ -30,6 +30,8 @@ export class Link {
     ctx: CanvasRenderingContext2D;
 
     packetsInTransit: { packet: Packet, from: Node, to: Node, progress: number }[] = [];
+    fading: boolean = false;
+    dead: boolean = false;
 
     constructor(a: Node, b: Node, ctx: CanvasRenderingContext2D){
         this.a = a;
@@ -84,6 +86,10 @@ export class Link {
 
     draw() : void {
         const control = this.controlPoint();
+        this.ctx.save();
+        if (this.fading) {
+            this.ctx.globalAlpha = 0.35;
+        }
         this.ctx.beginPath();
         this.ctx.strokeStyle = this.color;
         this.ctx.lineWidth = LINE.width;
@@ -93,6 +99,7 @@ export class Link {
         this.ctx.quadraticCurveTo(control.x, control.y, this.b.position.x, this.b.position.y);
         this.ctx.stroke();
         this.ctx.closePath();
+        this.ctx.restore();
     }
 
     send(packet: Packet, from: Node, to: Node) {
