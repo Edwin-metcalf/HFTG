@@ -47,7 +47,6 @@ function init() {
     canvas.style.display = 'block';
     gameManager.gameState = "PLACINGFIRM" as any;
     canvas.focus();
-    gameManager.pushText('Click anywhere to place your HQ', { x: canvas.width / 2, y: canvas.height / 2 }, '#2f2a26');
   }
 
   playBtn.addEventListener('click', startGame);
