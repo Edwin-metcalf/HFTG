@@ -247,6 +247,27 @@ export class GameManager {
         this.startNextDay();
     }
 
+    restart() {
+        this.elapsedTime = 0;
+        this.nodeList = [];
+        this.linkList = [];
+        this.floatingTexts = [];
+        this.tick = 0;
+        this.day = 1;
+        this.cableLevel = 1;
+        this.hqLevel = 1;
+        this.dayTicks = 0;
+        this.spawnTimer = BASE_SPAWN_INTERVAL;
+        this.lastStartingNode = null;
+        this.hoveredNode = null;
+        this.linkTarget = null;
+        this.linkTargetValid = false;
+        this.mousePos = null;
+        this.player.money = 556;
+        this.player.reputation = 0;
+        this.gameState = GameState.Start;
+    }
+
     private applyCableLevel() {
         const speed = this.cableSpeed();
         for (const link of this.linkList) {

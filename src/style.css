@@ -176,3 +176,38 @@ canvas#canvas {
   font-size: 14px;
   color: #6f665c;
 }
+
+.home-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid rgba(47, 42, 38, 0.16);
+  background: rgba(244, 241, 234, 0.9);
+  color: #2f2a26;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(47, 42, 38, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+  z-index: 10;
+}
+
+.home-btn.hidden {
+  display: none;
+}
+
+.home-btn:hover {
+  transform: translateY(-1px);
+  border-color: #2f2a26;
+  box-shadow: 0 10px 24px rgba(47, 42, 38, 0.18);
+}
+
+.home-btn:focus {
+  outline: 3px solid rgba(47, 42, 38, 0.25);
+  outline-offset: 2px;
+}

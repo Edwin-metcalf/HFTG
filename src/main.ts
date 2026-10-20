@@ -7,6 +7,7 @@ import type { XYpoint } from './network/nodes'
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <div class="stage">
   <canvas tabindex="0" id="canvas" width="1920" height="1080"></canvas>
+  <button id="homeBtn" class="home-btn hidden" type="button" title="Back to home">⌂</button>
   <div id="startOverlay" class="overlay start-overlay">
     <div class="panel start-panel">
       <h1 class="start-title">HFTG</h1>
@@ -35,6 +36,7 @@ function init() {
 
   const startOverlay = document.getElementById('startOverlay') as HTMLDivElement;
   const playBtn = document.getElementById('playBtn') as HTMLButtonElement;
+  const homeBtn = document.getElementById('homeBtn') as HTMLButtonElement;
   const overlay = document.getElementById('overlay') as HTMLDivElement;
   const overlayChoices = document.getElementById('overlayChoices') as HTMLDivElement;
 
@@ -44,12 +46,24 @@ function init() {
 
   function startGame() {
     startOverlay.classList.add('hidden');
+    homeBtn.classList.remove('hidden');
     canvas.style.display = 'block';
     gameManager.gameState = "PLACINGFIRM" as any;
     canvas.focus();
   }
 
+  function goHome() {
+    gameManager.restart();
+    canvas.style.display = 'none';
+    homeBtn.classList.add('hidden');
+    overlay.classList.add('hidden');
+    overlayDay = -1;
+    overlayChoices.innerHTML = '';
+    startOverlay.classList.remove('hidden');
+  }
+
   playBtn.addEventListener('click', startGame);
+  homeBtn.addEventListener('click', goHome);
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if ((e.key === 'Enter' || e.key === ' ') && startOverlay.classList.contains('hidden') === false) {
       e.preventDefault();
