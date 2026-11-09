@@ -21,6 +21,10 @@ export interface UpgradeOption {
     description: string;
 }
 
+type SellTarget =
+    | { kind: "link"; link: Link }
+    | { kind: "plant"; node: ProcessingPlantNode };
+
 //each ticker is a tradeable pair of markets; a new ticker = a new pair to connect
 const SYMBOLS = ["AAPL", "BTC", "GOLD", "OIL", "ETH", "NVDA", "TSLA", "SOL"];
 
@@ -55,6 +59,12 @@ const HQ_TIME_FACTOR = 0.75;
 const PLANT_COST = 100;
 //plants run slower than the main HQ, and stay slower as processing upgrades land
 const PLANT_TIME_MULTIPLIER = 1.35;
+
+//selling refunds half of what the player paid, and needs a deliberate drag
+const SELL_RATE = 0.5;
+const DRAG_THRESHOLD = 8;
+const SELL_BUTTON_SIZE = 68;
+const SELL_BUTTON_MARGIN = 28;
 
 interface FloatingText {
     text: string;
@@ -101,6 +111,12 @@ export class GameManager {
     editingLink: Link | null = null;
     editHandlePos: XYpoint | null = null;
     editSplitTarget: { node: Node, extraCost: number } | null = null;
+
+    //sell-by-dragging state
+    sellTarget: SellTarget | null = null;
+    sellHover: boolean = false;
+    private pointerDownPos: XYpoint | null = null;
+    private pointerDragged: boolean = false;
 
     private events: NodeEvents;
 
@@ -166,14 +182,20 @@ export class GameManager {
             if (!link.dead) link.update();
             else link.draw();
         }
+
+        //grey/red overlay for whatever the current sale would remove
+        this.drawSellTints();
+
         for(const node of this.nodeList) {
             if (this.gameState === GameState.Playing) node.update(this.elapsedTime);
             node.draw(this.ctx);
         }
 
+        this.drawSellPlantTint();
         this.drawHighlights();
         this.updateFloatingTexts();
         this.drawHint();
+        this.drawSellButton();
         this.drawDayBar();
         this.drawHUD();
     }
@@ -200,6 +222,7 @@ export class GameManager {
 
         if (this.dayTicks >= this.dayLength()) {
             this.dayTicks = this.dayLength();
+            this.clearSellSelection();
             this.rollUpgradeChoices();
             this.gameState = GameState.ChoosingUpgrade;
         }
@@ -292,6 +315,7 @@ export class GameManager {
             this.pendingPlants++;
             this.placementAfterUpgrade = true;
             this.lastStartingNode = null;
+            this.clearSellSelection();
             this.clearPointer();
             this.gameState = GameState.PlacingPlant;
             return;
@@ -306,6 +330,7 @@ export class GameManager {
         if (this.pendingPlants <= 0) return;
         this.placementAfterUpgrade = false;
         this.lastStartingNode = null;
+        this.clearSellSelection();
         this.clearPointer();
         this.gameState = GameState.PlacingPlant;
     }
@@ -322,6 +347,7 @@ export class GameManager {
         this.pendingPlants--;
         const plant = new ProcessingPlantNode(pos, this.player, this.events);
         plant.processingTicks = this.plantProcessingTicks();
+        plant.cost = PLANT_COST;
         this.nodeList.push(plant);
         this.pushText(`PLANT -$${PLANT_COST}`, pos, THEME.negative);
 
@@ -359,6 +385,10 @@ export class GameManager {
         this.spawnTimer = BASE_SPAWN_INTERVAL;
         this.placementAfterUpgrade = false;
         this.currentUpgradeChoices = [];
+        this.sellTarget = null;
+        this.sellHover = false;
+        this.pointerDownPos = null;
+        this.pointerDragged = false;
         this.lastStartingNode = null;
         this.hoveredNode = null;
         this.linkTarget = null;
@@ -406,6 +436,25 @@ export class GameManager {
             this.linkTargetValid = false;
             this.splitTarget = null;
             this.ctx.canvas.style.cursor = 'crosshair';
+            return;
+        }
+
+        this.sellHover = this.sellTarget !== null && this.mousePos !== null && this.isOverSellButton(this.mousePos);
+        if (this.sellHover) {
+            this.hoveredNode = null;
+            this.linkTarget = null;
+            this.linkTargetValid = false;
+            this.splitTarget = null;
+            this.ctx.canvas.style.cursor = 'pointer';
+            return;
+        }
+        //while a sale is selected, only show cable feedback once a drag starts
+        if (this.sellTarget && !this.pointerDragged) {
+            this.hoveredNode = null;
+            this.linkTarget = null;
+            this.linkTargetValid = false;
+            this.splitTarget = null;
+            this.ctx.canvas.style.cursor = 'pointer';
             return;
         }
         if (this.editingLink) {
@@ -666,17 +715,43 @@ export class GameManager {
     startLink(pos: XYpoint) {
         this.cancelEdit();
         this.splitTarget = null;
-        let startNode = this.getNodeAtPosition(pos, NODE_HIT_RADIUS);
-        if (startNode) {
+        this.pointerDownPos = { x: pos.x, y: pos.y };
+        this.pointerDragged = false;
+
+        //clicking the bin sells the current selection instead of starting a drag
+        if (this.sellTarget && this.isOverSellButton(pos)) {
+            this.sellHover = true;
+            return;
+        }
+
+        const startNode = this.getNodeAtPosition(pos, NODE_HIT_RADIUS);
+        const hitLink = startNode ? null : this.findLinkAt(pos);
+
+        //a processing plant is sellable, but still acts as a cable start point
+        //so the player can drag from it as before
+        if (startNode instanceof ProcessingPlantNode) {
+            this.sellTarget = { kind: "plant", node: startNode };
+            this.sellHover = false;
             this.lastStartingNode = startNode;
             return;
         }
-        const hitLink = this.findLinkAt(pos);
         if (hitLink) {
+            this.sellTarget = { kind: "link", link: hitLink };
+            this.sellHover = false;
+            this.lastStartingNode = null;
             this.editingLink = hitLink;
             this.editHandlePos = { x: pos.x, y: pos.y };
             this.editSplitTarget = null;
             hitLink.fading = true;
+            return;
+        }
+
+        //anything else drops the selection
+        this.clearSellSelection();
+        this.pointerDownPos = { x: pos.x, y: pos.y };
+
+        if (startNode) {
+            this.lastStartingNode = startNode;
             return;
         }
         const split = this.findSplitCandidate(null, pos);
@@ -690,6 +765,11 @@ export class GameManager {
 
     placingLink(pos: XYpoint) {
         this.mousePos = pos;
+        if (this.pointerDownPos) {
+            const dist = Math.hypot(pos.x - this.pointerDownPos.x, pos.y - this.pointerDownPos.y);
+            if (dist > DRAG_THRESHOLD) this.pointerDragged = true;
+        }
+        this.sellHover = this.sellTarget !== null && this.isOverSellButton(pos);
         if (this.editingLink) {
             this.editHandlePos = { x: pos.x, y: pos.y };
             const target = this.findEditSplitTarget(this.editingLink, pos);
@@ -713,8 +793,195 @@ export class GameManager {
         this.linkTarget = null;
         this.linkTargetValid = false;
         this.splitTarget = null;
+        this.sellHover = false;
+        this.pointerDownPos = null;
+        this.pointerDragged = false;
         this.cancelEdit();
         this.ctx.canvas.style.cursor = 'default';
+    }
+
+    //----- selling -----
+
+    //the bin sits centred at the bottom of the canvas
+    private sellButtonRect(): { x: number, y: number, size: number } {
+        const size = SELL_BUTTON_SIZE;
+        return {
+            x: (this.ctx.canvas.width - size) / 2,
+            y: this.ctx.canvas.height - SELL_BUTTON_MARGIN - size,
+            size,
+        };
+    }
+
+    private isOverSellButton(pos: XYpoint): boolean {
+        const rect = this.sellButtonRect();
+        const pad = 10;
+        return pos.x >= rect.x - pad && pos.x <= rect.x + rect.size + pad &&
+            pos.y >= rect.y - pad && pos.y <= rect.y + rect.size + pad;
+    }
+
+    //everything that would go if the current selection were sold
+    private sellLinks(target: SellTarget | null = this.sellTarget): Link[] {
+        if (!target) return [];
+        if (target.kind === "link") return target.link.dead ? [] : [target.link];
+        if (!this.nodeList.includes(target.node)) return [];
+        return this.linkList.filter(link => link.a === target.node || link.b === target.node);
+    }
+
+    private sellValueFor(target: SellTarget | null = this.sellTarget): number {
+        if (!target) return 0;
+        let value = 0;
+        if (target.kind === "plant") value += target.node.cost * SELL_RATE;
+        for (const link of this.sellLinks(target)) value += link.cost * SELL_RATE;
+        return value;
+    }
+
+    private removeLinkForSale(link: Link) {
+        if (link.dead) return;
+        link.dead = true;
+        link.fading = true;
+        //packets riding the cable are lost without a reputation hit
+        link.packetsInTransit.length = 0;
+        this.linkList = this.linkList.filter(item => item !== link);
+        link.a.links = link.a.links.filter(item => item !== link);
+        link.b.links = link.b.links.filter(item => item !== link);
+    }
+
+    clearSellSelection() {
+        this.sellTarget = null;
+        this.sellHover = false;
+        this.pointerDownPos = null;
+        this.pointerDragged = false;
+    }
+
+    private sellSelected() {
+        const target = this.sellTarget;
+        if (!target) return;
+
+        //a sold item can still be the active drag/edit anchor
+        this.cancelEdit();
+        this.splitTarget = null;
+        this.lastStartingNode = null;
+
+        const links = this.sellLinks(target);
+        const refund = this.sellValueFor(target);
+        const pos = target.kind === "link"
+            ? {
+                x: (target.link.a.position.x + target.link.b.position.x) / 2,
+                y: (target.link.a.position.y + target.link.b.position.y) / 2,
+            }
+            : target.node.position;
+
+        for (const link of links) {
+            this.removeLinkForSale(link);
+        }
+
+        if (target.kind === "plant") {
+            const plant = target.node;
+            //packets already routed to this plant go to another processor,
+            //preferring the permanent HQ
+            const replacement =
+                this.nodeList.find((node): node is FirmNode => node instanceof FirmNode && !(node instanceof ProcessingPlantNode) && node !== plant) ??
+                this.nodeList.find((node): node is FirmNode => node instanceof FirmNode && node !== plant) ??
+                null;
+            for (const node of this.nodeList) {
+                if (node === plant) continue;
+                node.retargetPackets(plant, replacement);
+            }
+            //packets already riding a cable toward the plant also need a new target
+            for (const link of this.linkList) {
+                for (const transit of link.packetsInTransit) {
+                    if (transit.packet.via === plant) transit.packet.via = replacement;
+                }
+            }
+            //anything still queued at the plant is dropped with it
+            plant.packetQueue.length = 0;
+            this.nodeList = this.nodeList.filter(node => node !== plant);
+        }
+
+        this.player.money += refund;
+        this.pushText(`+$${refund.toFixed(2)}`, pos, THEME.positive);
+        this.clearSellSelection();
+    }
+
+    //red/ grey out everything that would be sold
+    private drawSellTints() {
+        if (!this.sellTarget) return;
+        const color = this.sellHover ? THEME.negative : THEME.inkSoft;
+        const alpha = this.sellHover ? 0.6 : 0.28;
+        for (const link of this.sellLinks()) {
+            link.drawSellTint(this.ctx, color, alpha);
+        }
+    }
+
+    //the plant itself is drawn over the stations so the tint stays visible
+    private drawSellPlantTint() {
+        if (!this.sellTarget || this.sellTarget.kind !== "plant") return;
+        const color = this.sellHover ? THEME.negative : THEME.inkSoft;
+        const alpha = this.sellHover ? 0.6 : 0.28;
+        const node = this.sellTarget.node;
+        const half = STATION.hqSize / 2;
+        this.ctx.save();
+        this.ctx.globalAlpha = alpha;
+        this.ctx.fillStyle = color;
+        this.ctx.beginPath();
+        this.ctx.roundRect(node.position.x - half, node.position.y - half, STATION.hqSize, STATION.hqSize, 10);
+        this.ctx.fill();
+        this.ctx.restore();
+    }
+
+    private drawSellButton() {
+        if (!this.sellTarget) return;
+        const rect = this.sellButtonRect();
+        const cx = rect.x + rect.size / 2;
+        const cy = rect.y + rect.size / 2;
+        const active = this.sellHover;
+
+        this.ctx.save();
+        this.ctx.shadowColor = 'rgba(47, 42, 38, 0.22)';
+        this.ctx.shadowBlur = 18;
+        this.ctx.shadowOffsetY = 6;
+        this.ctx.beginPath();
+        this.ctx.roundRect(rect.x, rect.y, rect.size, rect.size, 16);
+        this.ctx.fillStyle = active ? THEME.negative : THEME.ink;
+        this.ctx.fill();
+        this.ctx.restore();
+
+        //simple bin icon
+        this.ctx.save();
+        this.ctx.strokeStyle = THEME.hqText;
+        this.ctx.fillStyle = THEME.hqText;
+        this.ctx.lineWidth = 3;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.beginPath();
+        this.ctx.moveTo(cx - 13, cy - 12);
+        this.ctx.lineTo(cx + 13, cy - 12);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(cx - 7, cy - 12);
+        this.ctx.lineTo(cx - 6, cy - 18);
+        this.ctx.lineTo(cx + 6, cy - 18);
+        this.ctx.lineTo(cx + 7, cy - 12);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.roundRect(cx - 11, cy - 8, 22, 26, 4);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(cx - 4, cy - 3);
+        this.ctx.lineTo(cx - 3, cy + 13);
+        this.ctx.moveTo(cx + 4, cy - 3);
+        this.ctx.lineTo(cx + 3, cy + 13);
+        this.ctx.stroke();
+        this.ctx.restore();
+
+        //refund preview
+        const refund = this.sellValueFor();
+        this.ctx.save();
+        this.ctx.textAlign = 'center';
+        this.ctx.font = `bold 22px ${MONO}`;
+        this.ctx.fillStyle = active ? THEME.negative : THEME.ink;
+        this.ctx.fillText(`+$${refund.toFixed(2)}`, cx, rect.y - 16);
+        this.ctx.restore();
     }
 
     private splitLink(split: { link: Link, node: Node, extraCost: number }) {
@@ -749,6 +1016,26 @@ export class GameManager {
     }
 
     placeLink(pos: XYpoint) {
+        const dragged = this.pointerDragged;
+
+        //release over the bin sells, whether it was a drag or a plain click
+        if (this.sellTarget && this.isOverSellButton(pos)) {
+            this.sellSelected();
+            this.pointerDownPos = null;
+            this.pointerDragged = false;
+            return null;
+        }
+
+        const result = this.placeLinkAction(pos);
+        this.pointerDownPos = null;
+        this.pointerDragged = false;
+        this.sellHover = false;
+        //a real drag was a cable/split action, so drop the selection
+        if (dragged) this.clearSellSelection();
+        return result;
+    }
+
+    private placeLinkAction(pos: XYpoint) {
         if (this.editingLink) {
             if (this.editSplitTarget && this.editSplitTarget.extraCost <= this.player.money) {
                 this.splitLink({ link: this.editingLink, node: this.editSplitTarget.node, extraCost: this.editSplitTarget.extraCost });
@@ -799,6 +1086,8 @@ export class GameManager {
     }
 
     drawLinkPreview() {
+        if (this.sellHover) return;
+        if (this.sellTarget && !this.pointerDragged) return;
         if (this.editingLink && this.editHandlePos && this.mousePos) {
             const link = this.editingLink;
             const a = link.a.position;
@@ -966,6 +1255,8 @@ export class GameManager {
     }
 
     private drawHighlights() {
+        if (this.sellHover) return;
+        if (this.sellTarget && !this.pointerDragged) return;
         const radius = STATION.radius + 9;
         this.drawLinkHover();
 
@@ -1038,6 +1329,7 @@ export class GameManager {
             this.ctx.restore();
             return;
         }
+        if (this.sellTarget) return;
         if (this.linkList.length > 0 || this.nodeList.length < 2) return;
         this.ctx.save();
         this.ctx.textAlign = 'center';

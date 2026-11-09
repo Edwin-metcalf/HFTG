@@ -55,6 +55,13 @@ export abstract class Node {
         this.packetQueue.push(packet);
     }
 
+    //points packets that were heading to a node at its replacement instead
+    retargetPackets(from: Node, to: Node | null): void {
+        for (const packet of this.packetQueue) {
+            if (packet.via === from) packet.via = to;
+        }
+    }
+
     //time is elapsed seconds so packets can expire while they wait
     update(time: number): void {
         if (this.packetQueue.length < 1){
@@ -141,6 +148,13 @@ export class FirmNode extends Node {
     //how many packets are waiting for this node to process them
     queuedCount(): number {
         return this.processingQueue.length;
+    }
+
+    retargetPackets(from: Node, to: Node | null): void {
+        super.retargetPackets(from, to);
+        for (const entry of this.processingQueue) {
+            if (entry.packet.via === from) entry.packet.via = to;
+        }
     }
 
     //this is like the node that the player.ts has the visual and logic
@@ -290,6 +304,8 @@ export class FirmNode extends Node {
 //but it runs slower. The manager sets its processingTicks when it is built.
 export class ProcessingPlantNode extends FirmNode {
     protected label: string = 'HQ2';
+    //what the player paid to place it, used for the 50% sell-back
+    cost: number = 0;
 }
 
 export class StockExchangeNode extends Node {

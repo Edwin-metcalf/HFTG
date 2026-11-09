@@ -80,8 +80,11 @@ function init() {
     if (e.key === 'Escape') {
       if (gameManager.gameState === 'PLACINGPLANT') {
         gameManager.cancelPlantPlacement();
-      } else if ((gameManager as any).editingLink) {
-        (gameManager as any).cancelEdit();
+      } else {
+        gameManager.clearSellSelection();
+        if ((gameManager as any).editingLink) {
+          (gameManager as any).cancelEdit();
+        }
       }
     }
   });
@@ -161,8 +164,11 @@ function init() {
     e.preventDefault();
     if (gameManager.gameState === 'PLACINGPLANT') {
       gameManager.cancelPlantPlacement();
-    } else if ((gameManager as any).editingLink) {
-      (gameManager as any).cancelEdit();
+    } else {
+      gameManager.clearSellSelection();
+      if ((gameManager as any).editingLink) {
+        (gameManager as any).cancelEdit();
+      }
     }
   });
 

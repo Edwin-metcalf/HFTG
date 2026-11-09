@@ -102,6 +102,22 @@ export class Link {
         this.ctx.restore();
     }
 
+    //redraws the cable as a thick tint so it can be greyed/reddened for sale
+    drawSellTint(ctx: CanvasRenderingContext2D, color: string, alpha: number): void {
+        const control = this.controlPoint();
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = LINE.width + 7;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.moveTo(this.a.position.x, this.a.position.y);
+        ctx.quadraticCurveTo(control.x, control.y, this.b.position.x, this.b.position.y);
+        ctx.stroke();
+        ctx.restore();
+    }
+
     send(packet: Packet, from: Node, to: Node) {
         this.packetsInTransit.push({ packet, from, to, progress: 0 });
     }
