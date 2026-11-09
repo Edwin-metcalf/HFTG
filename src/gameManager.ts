@@ -1,5 +1,5 @@
 import { Link, cableCost } from "./network/links";
-import { StockExchangeNode, FirmNode, findNextHop, type Node, type NodeEvents, type XYpoint } from "./network/nodes";
+import { StockExchangeNode, FirmNode, ProcessingPlantNode, findNextHop, type Node, type NodeEvents, type XYpoint } from "./network/nodes";
 import { Packet } from "./network/packets";
 import type { Firm } from "./player";
 import { FONT, LINE, MONO, STATION, THEME } from "./theme";
@@ -10,9 +10,10 @@ export enum GameState {
     SpawningExchanges = "SPAWNINGEXCHANGES",
     Playing = "PLAYING",
     ChoosingUpgrade = "CHOOSINGUPGRADE",
+    PlacingPlant = "PLACINGPLANT",
 }
 
-export type UpgradeId = "cables" | "hq";
+export type UpgradeId = "cables" | "hq" | "plant";
 
 export interface UpgradeOption {
     id: UpgradeId;
@@ -50,6 +51,10 @@ const CABLE_SPEED_STEP = 0.75;
 //hq upgrade: -25% processing time per level
 const BASE_PROCESSING_TICKS = 60;
 const HQ_TIME_FACTOR = 0.75;
+//processing plants are bought into stock, then cost cash to actually place
+const PLANT_COST = 100;
+//plants run slower than the main HQ, and stay slower as processing upgrades land
+const PLANT_TIME_MULTIPLIER = 1.35;
 
 interface FloatingText {
     text: string;
@@ -72,8 +77,12 @@ export class GameManager {
     day: number = 1;
     cableLevel: number = 1;
     hqLevel: number = 1;
+    //plants chosen from the upgrade screen and waiting to be placed
+    pendingPlants: number = 0;
     private dayTicks: number = 0;
     private spawnTimer: number = BASE_SPAWN_INTERVAL;
+    private placementAfterUpgrade: boolean = false;
+    private currentUpgradeChoices: UpgradeOption[] = [];
 
     ctx: CanvasRenderingContext2D;
     mousePos: XYpoint | null = null;
@@ -191,6 +200,7 @@ export class GameManager {
 
         if (this.dayTicks >= this.dayLength()) {
             this.dayTicks = this.dayLength();
+            this.rollUpgradeChoices();
             this.gameState = GameState.ChoosingUpgrade;
         }
     }
@@ -207,6 +217,11 @@ export class GameManager {
         return Math.max(12, Math.round(BASE_PROCESSING_TICKS * Math.pow(HQ_TIME_FACTOR, this.hqLevel - 1)));
     }
 
+    //plants share the HQ upgrades but are always a bit slower
+    plantProcessingTicks(): number {
+        return Math.max(16, Math.round(this.processingTicks() * PLANT_TIME_MULTIPLIER));
+    }
+
     //ticks between opportunities for the current day
     spawnInterval(): number {
         return Math.max(30, Math.round(BASE_SPAWN_INTERVAL * Math.pow(SPAWN_DAY_DECAY, this.day - 1)));
@@ -221,36 +236,113 @@ export class GameManager {
         return Math.min(1, this.dayTicks / this.dayLength());
     }
 
-    //the two upgrades offered at the end of each day
-    upgradeChoices(): UpgradeOption[] {
-        const nextCableSpeed = 1 + CABLE_SPEED_STEP * this.cableLevel;
-        const nextHqTicks = Math.max(12, Math.round(BASE_PROCESSING_TICKS * Math.pow(HQ_TIME_FACTOR, this.hqLevel)));
-        return [
-            {
-                id: "cables",
+    //pick two distinct upgrades from the three available types for this day
+    private rollUpgradeChoices() {
+        const pool: UpgradeId[] = ["cables", "hq", "plant"];
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        this.currentUpgradeChoices = pool.slice(0, 2).map(id => this.upgradeOption(id));
+    }
+
+    private upgradeOption(id: UpgradeId): UpgradeOption {
+        if (id === "cables") {
+            const nextCableSpeed = 1 + CABLE_SPEED_STEP * this.cableLevel;
+            return {
+                id,
                 title: "Faster cables",
                 description: `Transit ${this.cableSpeed().toFixed(2)}x → ${nextCableSpeed.toFixed(2)}x`,
-            },
-            {
-                id: "hq",
+            };
+        }
+        if (id === "hq") {
+            const nextHqTicks = Math.max(12, Math.round(BASE_PROCESSING_TICKS * Math.pow(HQ_TIME_FACTOR, this.hqLevel)));
+            return {
+                id,
                 title: "Faster HQ",
                 description: `Processing ${(this.processingTicks() / 60).toFixed(2)}s → ${(nextHqTicks / 60).toFixed(2)}s`,
-            },
-        ];
+            };
+        }
+        return {
+            id,
+            title: "Processing plant",
+            description: `Adds 1 to stock · $${PLANT_COST} to place · ${(this.plantProcessingTicks() / 60).toFixed(2)}s/packet`,
+        };
+    }
+
+    //the two upgrades offered at the end of each day
+    upgradeChoices(): UpgradeOption[] {
+        if (this.currentUpgradeChoices.length === 0) this.rollUpgradeChoices();
+        return this.currentUpgradeChoices;
     }
 
     chooseUpgrade(id: UpgradeId) {
         if (this.gameState !== GameState.ChoosingUpgrade) return;
 
+        this.currentUpgradeChoices = [];
+
         if (id === "cables") {
             this.cableLevel++;
             this.applyCableLevel();
-        } else {
+        } else if (id === "hq") {
             this.hqLevel++;
             this.applyHqLevel();
+        } else {
+            //the plant goes into stock; the player places it and pays then
+            this.pendingPlants++;
+            this.placementAfterUpgrade = true;
+            this.lastStartingNode = null;
+            this.clearPointer();
+            this.gameState = GameState.PlacingPlant;
+            return;
         }
 
         this.startNextDay();
+    }
+
+    //enters placement mode mid-day for a plant already in stock
+    beginPlantPlacement() {
+        if (this.gameState !== GameState.Playing) return;
+        if (this.pendingPlants <= 0) return;
+        this.placementAfterUpgrade = false;
+        this.lastStartingNode = null;
+        this.clearPointer();
+        this.gameState = GameState.PlacingPlant;
+    }
+
+    placeProcessingPlant(pos: XYpoint) {
+        if (this.gameState !== GameState.PlacingPlant) return;
+        if (this.pendingPlants <= 0) return;
+        if (this.player.money < PLANT_COST) {
+            this.pushText(`NEED $${PLANT_COST}`, pos, THEME.warning);
+            return;
+        }
+
+        this.player.money -= PLANT_COST;
+        this.pendingPlants--;
+        const plant = new ProcessingPlantNode(pos, this.player, this.events);
+        plant.processingTicks = this.plantProcessingTicks();
+        this.nodeList.push(plant);
+        this.pushText(`PLANT -$${PLANT_COST}`, pos, THEME.negative);
+
+        if (this.placementAfterUpgrade) {
+            this.placementAfterUpgrade = false;
+            this.startNextDay();
+        } else {
+            this.gameState = GameState.Playing;
+        }
+    }
+
+    //keeps the plant in stock and gets back to the game
+    cancelPlantPlacement() {
+        if (this.gameState !== GameState.PlacingPlant) return;
+        const afterUpgrade = this.placementAfterUpgrade;
+        this.placementAfterUpgrade = false;
+        if (afterUpgrade) {
+            this.startNextDay();
+        } else {
+            this.gameState = GameState.Playing;
+        }
     }
 
     restart() {
@@ -262,8 +354,11 @@ export class GameManager {
         this.day = 1;
         this.cableLevel = 1;
         this.hqLevel = 1;
+        this.pendingPlants = 0;
         this.dayTicks = 0;
         this.spawnTimer = BASE_SPAWN_INTERVAL;
+        this.placementAfterUpgrade = false;
+        this.currentUpgradeChoices = [];
         this.lastStartingNode = null;
         this.hoveredNode = null;
         this.linkTarget = null;
@@ -282,9 +377,14 @@ export class GameManager {
     }
 
     private applyHqLevel() {
-        const ticks = this.processingTicks();
+        const hqTicks = this.processingTicks();
+        const plantTicks = this.plantProcessingTicks();
         for (const node of this.nodeList) {
-            if (node instanceof FirmNode) node.processingTicks = ticks;
+            if (node instanceof ProcessingPlantNode) {
+                node.processingTicks = plantTicks;
+            } else if (node instanceof FirmNode) {
+                node.processingTicks = hqTicks;
+            }
         }
     }
 
@@ -300,6 +400,14 @@ export class GameManager {
 
     //tracks what the pointer is hovering / snapping to
     private updatePointerState() {
+        if (this.gameState === GameState.PlacingPlant) {
+            this.hoveredNode = null;
+            this.linkTarget = null;
+            this.linkTargetValid = false;
+            this.splitTarget = null;
+            this.ctx.canvas.style.cursor = 'crosshair';
+            return;
+        }
         if (this.editingLink) {
             this.hoveredNode = null;
             this.linkTarget = null;
@@ -450,28 +558,59 @@ export class GameManager {
         }
         if (opportunities.length === 0) return;
 
-        //only trade a pair once the player can actually route it: source -> HQ -> dest.
-        //new tickers sit idle until cabled in, so they never cost reputation unfairly.
-        const hq = this.nodeList.find((node): node is FirmNode => node instanceof FirmNode);
-        const routable = hq
-            ? opportunities.filter(opp => findNextHop(opp.source, hq) !== null && findNextHop(hq, opp.dest) !== null)
-            : [];
+        //only trade a pair once the player can route it via a processor:
+        //source -> processor -> dest. new tickers sit idle until cabled in,
+        //so they never cost reputation unfairly.
+        const routable: { source: StockExchangeNode; dest: StockExchangeNode; symbol: string; processor: FirmNode }[] = [];
+        for (const opp of opportunities) {
+            const processor = this.findRouteProcessor(opp.source, opp.dest);
+            if (processor) {
+                routable.push({ source: opp.source, dest: opp.dest, symbol: opp.symbol, processor });
+            }
+        }
         if (routable.length === 0) return;
 
         const pick = routable[Math.floor(Math.random() * routable.length)];
 
         //a single opportunity is really a batch of share-packets: each one is
-        //queued and processed at the HQ one at a time, so a 98->100 move only
-        //pays the spread per packet, not the whole batch at once
+        //queued and processed at the processor one at a time, so a 98->100 move
+        //only pays the spread per packet, not the whole batch at once
         const batch = BATCH_MIN + Math.floor(Math.random() * (BATCH_MAX - BATCH_MIN + 1));
         const expiresAt = this.elapsedTime + OPPORTUNITY_TTL;
         for (let i = 0; i < batch; i++) {
             const packet = new Packet(pick.source, pick.dest, pick.symbol, pick.source.price, this.elapsedTime);
             packet.expiresAt = expiresAt;
             packet.size = PACKET_SIZE;
+            packet.via = pick.processor;
             pick.source.recievePackets(packet);
         }
         this.pushText(`\u00d7${batch} ${pick.symbol}`, pick.source.position, THEME.inkSoft);
+    }
+
+    //picks the processor a packet should visit. load comes first so extra
+    //plants actually get used, with cable distance breaking ties.
+    private findRouteProcessor(source: StockExchangeNode, dest: StockExchangeNode): FirmNode | null {
+        const processors = this.nodeList.filter(
+            (node): node is FirmNode => node instanceof FirmNode
+        );
+
+        let best: FirmNode | null = null;
+        let bestScore = Infinity;
+        for (const processor of processors) {
+            if (findNextHop(source, processor) === null) continue;
+            if (findNextHop(processor, dest) === null) continue;
+
+            const distance =
+                Math.hypot(source.position.x - processor.position.x, source.position.y - processor.position.y) +
+                Math.hypot(dest.position.x - processor.position.x, dest.position.y - processor.position.y);
+            const score = processor.queuedCount() * 150 + distance;
+
+            if (score < bestScore) {
+                bestScore = score;
+                best = processor;
+            }
+        }
+        return best;
     }
 
     getRandomXYpoint(): XYpoint {
@@ -879,6 +1018,26 @@ export class GameManager {
             this.ctx.restore();
             return;
         }
+        if (this.gameState === GameState.PlacingPlant) {
+            this.ctx.save();
+            this.ctx.textAlign = 'center';
+            this.ctx.fillStyle = THEME.ink;
+            this.ctx.font = `28px ${FONT}`;
+            this.ctx.fillText(
+                `Click anywhere to place a processing plant ($${PLANT_COST})`,
+                this.ctx.canvas.width / 2,
+                this.ctx.canvas.height / 2,
+            );
+            this.ctx.fillStyle = THEME.inkSoft;
+            this.ctx.font = `18px ${FONT}`;
+            this.ctx.fillText(
+                'Esc to keep it in stock',
+                this.ctx.canvas.width / 2,
+                this.ctx.canvas.height / 2 + 38,
+            );
+            this.ctx.restore();
+            return;
+        }
         if (this.linkList.length > 0 || this.nodeList.length < 2) return;
         this.ctx.save();
         this.ctx.textAlign = 'center';
@@ -962,5 +1121,16 @@ export class GameManager {
         this.ctx.font = `16px ${FONT}`;
         this.ctx.fillText(`Cables ×${this.cableSpeed().toFixed(2)}`, 42, 164);
         this.ctx.fillText(`HQ ${(this.processingTicks() / 60).toFixed(2)}s`, 42, 188);
+
+        let hudY = 212;
+        const plantCount = this.nodeList.filter(node => node instanceof ProcessingPlantNode).length;
+        if (plantCount > 0) {
+            this.ctx.fillText(`Plants ${plantCount} · ${(this.plantProcessingTicks() / 60).toFixed(2)}s`, 42, hudY);
+            hudY += 24;
+        }
+        if (this.pendingPlants > 0) {
+            this.ctx.fillStyle = THEME.warning;
+            this.ctx.fillText(`Plant in stock ${this.pendingPlants} · $${PLANT_COST} to place`, 42, hudY);
+        }
     }
 }

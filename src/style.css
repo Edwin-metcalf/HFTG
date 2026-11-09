@@ -201,6 +201,39 @@ canvas#canvas {
   display: none;
 }
 
+.plant-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  padding: 12px 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, 'Roboto Mono', monospace;
+  font-size: 15px;
+  font-weight: bold;
+  color: #f4f1ea;
+  background: #2f2a26;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(47, 42, 38, 0.18);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  z-index: 10;
+}
+
+.plant-btn.hidden {
+  display: none;
+}
+
+.plant-btn:hover {
+  transform: translateY(-1px);
+  background: #3a332c;
+  box-shadow: 0 10px 24px rgba(47, 42, 38, 0.24);
+}
+
+.plant-btn:focus {
+  outline: 3px solid rgba(47, 42, 38, 0.25);
+  outline-offset: 2px;
+}
+
 .home-btn:hover {
   transform: translateY(-1px);
   border-color: #2f2a26;

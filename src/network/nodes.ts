@@ -70,9 +70,12 @@ export abstract class Node {
         this.processPacket(packetToProcess);
     }
 
-    //finds the next hop toward the packet destination and hands the packet off
+    //finds the next hop toward the packet target and hands the packet off.
+    //unprocessed packets head to their assigned processor first, then to the
+    //destination market once they have been processed.
     protected forward(packet: Packet): boolean {
-        const nextHop = findNextHop(this, packet.dest);
+        const target = packet.processed ? packet.dest : (packet.via ?? packet.dest);
+        const nextHop = findNextHop(this, target);
         if (!nextHop) {
             //no known path yet, hold onto it and retry when links change
             this.packetQueue.push(packet);
@@ -133,6 +136,12 @@ export class FirmNode extends Node {
     //how many ticks the HQ takes to clear one packet (1 second)
     processingTicks: number = 60;
     private processingQueue: ProcessingEntry[] = [];
+    protected label: string = 'HQ';
+
+    //how many packets are waiting for this node to process them
+    queuedCount(): number {
+        return this.processingQueue.length;
+    }
 
     //this is like the node that the player.ts has the visual and logic
     draw(ctx: CanvasRenderingContext2D): void {
@@ -156,7 +165,7 @@ export class FirmNode extends Node {
         ctx.font = `bold 14px ${FONT}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('HQ', this.position.x, this.position.y + 1);
+        ctx.fillText(this.label, this.position.x, this.position.y + 1);
         ctx.textBaseline = 'alphabetic';
     }
 
@@ -276,6 +285,13 @@ export class FirmNode extends Node {
     }
 
 }
+
+//a secondary processing site: same queue/processing behaviour as the HQ,
+//but it runs slower. The manager sets its processingTicks when it is built.
+export class ProcessingPlantNode extends FirmNode {
+    protected label: string = 'HQ2';
+}
+
 export class StockExchangeNode extends Node {
     symbol: string = "";
     price: number = 0;
@@ -292,9 +308,13 @@ export class StockExchangeNode extends Node {
         if (packet.dest === this) {
             if (packet.processed) {
                 this.calculateProfit(packet);
-            } else {
+            } else if (!packet.via) {
                 //reached the destination without going through the HQ
                 this.events.onRejected?.(packet, this.position);
+            } else {
+                //the route to its processor happens to pass through the
+                //destination first; keep going instead of rejecting it
+                this.forward(packet);
             }
             return;
         }

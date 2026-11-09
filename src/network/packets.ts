@@ -12,6 +12,9 @@ export class Packet {
     createdAt: number;
     expiresAt: number;
 
+    //the processing node this packet should visit before it can settle
+    via: Node | null = null;
+
     //only a packet that has been processed at the HQ can settle a trade
     processed: boolean = false;
     //quantity of the instrument being traded

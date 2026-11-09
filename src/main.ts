@@ -8,6 +8,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <div class="stage">
   <canvas tabindex="0" id="canvas" width="1920" height="1080"></canvas>
   <button id="homeBtn" class="home-btn hidden" type="button" title="Back to home">⌂</button>
+  <button id="plantBtn" class="plant-btn hidden" type="button">Place plant · $100</button>
   <div id="startOverlay" class="overlay start-overlay">
     <div class="panel start-panel">
       <h1 class="start-title">HFTG</h1>
@@ -37,6 +38,7 @@ function init() {
   const startOverlay = document.getElementById('startOverlay') as HTMLDivElement;
   const playBtn = document.getElementById('playBtn') as HTMLButtonElement;
   const homeBtn = document.getElementById('homeBtn') as HTMLButtonElement;
+  const plantBtn = document.getElementById('plantBtn') as HTMLButtonElement;
   const overlay = document.getElementById('overlay') as HTMLDivElement;
   const overlayChoices = document.getElementById('overlayChoices') as HTMLDivElement;
 
@@ -56,6 +58,7 @@ function init() {
     gameManager.restart();
     canvas.style.display = 'none';
     homeBtn.classList.add('hidden');
+    plantBtn.classList.add('hidden');
     overlay.classList.add('hidden');
     overlayDay = -1;
     overlayChoices.innerHTML = '';
@@ -64,6 +67,10 @@ function init() {
 
   playBtn.addEventListener('click', startGame);
   homeBtn.addEventListener('click', goHome);
+  plantBtn.addEventListener('click', () => {
+    gameManager.beginPlantPlacement();
+    plantBtn.classList.add('hidden');
+  });
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if ((e.key === 'Enter' || e.key === ' ') && startOverlay.classList.contains('hidden') === false) {
       e.preventDefault();
@@ -71,7 +78,9 @@ function init() {
       return;
     }
     if (e.key === 'Escape') {
-      if ((gameManager as any).editingLink) {
+      if (gameManager.gameState === 'PLACINGPLANT') {
+        gameManager.cancelPlantPlacement();
+      } else if ((gameManager as any).editingLink) {
         (gameManager as any).cancelEdit();
       }
     }
@@ -111,6 +120,17 @@ function init() {
     overlay.classList.remove('hidden');
   }
 
+  //a stock plant can be placed later, even if the day has already moved on
+  function renderPlantButton() {
+    const show = gameManager.pendingPlants > 0 && gameManager.gameState === 'PLAYING';
+    plantBtn.classList.toggle('hidden', !show);
+    if (show) {
+      plantBtn.textContent = gameManager.pendingPlants > 1
+        ? `Place plant ×${gameManager.pendingPlants} · $100`
+        : 'Place plant · $100';
+    }
+  }
+
   function getCanvasPos(e: MouseEvent): XYpoint {
     //this is a helper function that is needed to correctly get the mouse position
     const rect = canvas.getBoundingClientRect();
@@ -129,6 +149,8 @@ function init() {
 
     if (gameManager.gameState === "PLACINGFIRM") {
       gameManager.placeFirmNode(point);
+    } else if (gameManager.gameState === "PLACINGPLANT") {
+      gameManager.placeProcessingPlant(point);
     } else {
       //this will need states cause mousedown cant always do the same thing
       gameManager.startLink(point)
@@ -137,7 +159,9 @@ function init() {
 
   canvas.addEventListener('contextmenu', (e: MouseEvent) => {
     e.preventDefault();
-    if ((gameManager as any).editingLink) {
+    if (gameManager.gameState === 'PLACINGPLANT') {
+      gameManager.cancelPlantPlacement();
+    } else if ((gameManager as any).editingLink) {
       (gameManager as any).cancelEdit();
     }
   });
@@ -161,6 +185,7 @@ function init() {
   canvas.addEventListener('tick', () => {
     gameManager.update();
     renderOverlay();
+    renderPlantButton();
   });
 }
 init();
