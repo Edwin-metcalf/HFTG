@@ -148,7 +148,7 @@ function init() {
   canvas.addEventListener('mousedown', (e: MouseEvent) => {
     if (e.button !== 0) return;
     //these make sure its the correct location on the screen relative to canvas on page
-    const point = getCanvasPos(e);
+    const point = gameManager.screenToWorld(getCanvasPos(e));
 
     if (gameManager.gameState === "PLACINGFIRM") {
       gameManager.placeFirmNode(point);
@@ -173,7 +173,7 @@ function init() {
   });
 
   canvas.addEventListener('mousemove', (e: MouseEvent) => {
-    const point = getCanvasPos(e);
+    const point = gameManager.screenToWorld(getCanvasPos(e));
 
     gameManager.placingLink(point)
 
@@ -184,7 +184,7 @@ function init() {
   });
 
   canvas.addEventListener('mouseup', (e: MouseEvent) => {
-    const point = getCanvasPos(e);
+    const point = gameManager.screenToWorld(getCanvasPos(e));
 
     gameManager.placeLink(point)
   });

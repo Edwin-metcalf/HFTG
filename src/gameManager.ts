@@ -1,3 +1,4 @@
+import { Camera } from "./camera";
 import { Link, cableCost } from "./network/links";
 import { StockExchangeNode, FirmNode, ProcessingPlantNode, findNextHop, type Node, type NodeEvents, type XYpoint } from "./network/nodes";
 import { Packet } from "./network/packets";
@@ -34,6 +35,8 @@ const OPPORTUNITY_TTL = 24;
 const MIN_SPREAD = 0.6;
 //how close the cursor must be to grab or snap to a node
 const NODE_HIT_RADIUS = 80;
+//how far markets keep from the screen edge when they spawn, in screen pixels
+const SPAWN_PADDING = 140;
 //one share per packet; a trade fires a whole burst of them
 const PACKET_SIZE = 1;
 //how many share-packets a single opportunity sends down the wire
@@ -95,6 +98,7 @@ export class GameManager {
     private currentUpgradeChoices: UpgradeOption[] = [];
 
     ctx: CanvasRenderingContext2D;
+    camera: Camera;
     mousePos: XYpoint | null = null;
 
     gameState: GameState;
@@ -125,6 +129,7 @@ export class GameManager {
         this.elapsedTime = 0;
         this.player = player;
         this.ctx = ctx;
+        this.camera = new Camera(ctx.canvas.width, ctx.canvas.height);
         this.gameState = GameState.Start;
 
         this.events = {
@@ -153,6 +158,8 @@ export class GameManager {
         if (this.gameState === GameState.PlacingFirm) {
             this.drawBackground();
             this.updatePointerState();
+            this.ctx.save();
+            this.camera.apply(this.ctx);
             this.drawLinkPreview();
             for (const link of this.linkList) {
                 if (link.dead && link.packetsInTransit.length === 0) continue;
@@ -163,6 +170,7 @@ export class GameManager {
             }
             this.drawHighlights();
             this.updateFloatingTexts();
+            this.ctx.restore();
             this.drawHint();
             return;
         }
@@ -173,6 +181,11 @@ export class GameManager {
 
         this.drawBackground();
         this.updatePointerState();
+
+        //world objects are drawn through the camera, then the HUD is drawn
+        //on top in plain screen space
+        this.ctx.save();
+        this.camera.apply(this.ctx);
 
         //preview cable tucks under the stations
         this.drawLinkPreview();
@@ -194,6 +207,8 @@ export class GameManager {
         this.drawSellPlantTint();
         this.drawHighlights();
         this.updateFloatingTexts();
+        this.ctx.restore();
+
         this.drawHint();
         this.drawSellButton();
         this.drawDayBar();
@@ -204,6 +219,7 @@ export class GameManager {
     private simulate() {
         this.tick++;
         this.elapsedTime = this.tick / 60;
+        this.camera.update(this.elapsedTime);
         this.dayTicks++;
 
         if (this.tick === 100) {
@@ -373,6 +389,7 @@ export class GameManager {
 
     restart() {
         this.elapsedTime = 0;
+        this.camera.reset();
         this.nodeList = [];
         this.linkList = [];
         this.floatingTexts = [];
@@ -569,6 +586,11 @@ export class GameManager {
         return null;
     }
 
+    //mouse events arrive in screen space; gameplay works in world space
+    screenToWorld(pos: XYpoint): XYpoint {
+        return this.camera.screenToWorld(pos);
+    }
+
     placeFirmNode(pos: XYpoint) {
         const firmNode = new FirmNode(pos, this.player, this.events);
         firmNode.processingTicks = this.processingTicks();
@@ -663,15 +685,18 @@ export class GameManager {
     }
 
     getRandomXYpoint(): XYpoint {
-        const padding = 140;
-        const width = this.ctx.canvas.width;
-        const height = this.ctx.canvas.height;
+        //markets spawn inside whatever the camera can currently see, inset by
+        //a fixed amount of screen space so they never sit under the HUD/edge
+        const rect = this.camera.visibleRect();
+        const pad = SPAWN_PADDING / this.camera.zoom;
+        const innerWidth = Math.max(1, rect.width - pad * 2);
+        const innerHeight = Math.max(1, rect.height - pad * 2);
 
-        let fallback: XYpoint = { x: padding, y: padding };
+        let fallback: XYpoint = { x: rect.x + pad, y: rect.y + pad };
         for (let attempt = 0; attempt < 30; attempt++) {
             const point = {
-                x: padding + Math.random() * (width - padding * 2),
-                y: padding + Math.random() * (height - padding * 2),
+                x: rect.x + pad + Math.random() * innerWidth,
+                y: rect.y + pad + Math.random() * innerHeight,
             };
             fallback = point;
             const clear = this.nodeList.every(node => {
@@ -813,10 +838,12 @@ export class GameManager {
     }
 
     private isOverSellButton(pos: XYpoint): boolean {
+        //the bin is screen-space UI, so map the world pointer back first
+        const screen = this.camera.worldToScreen(pos);
         const rect = this.sellButtonRect();
         const pad = 10;
-        return pos.x >= rect.x - pad && pos.x <= rect.x + rect.size + pad &&
-            pos.y >= rect.y - pad && pos.y <= rect.y + rect.size + pad;
+        return screen.x >= rect.x - pad && screen.x <= rect.x + rect.size + pad &&
+            screen.y >= rect.y - pad && screen.y <= rect.y + rect.size + pad;
     }
 
     //everything that would go if the current selection were sold
